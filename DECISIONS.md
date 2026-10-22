@@ -31,6 +31,7 @@ Convenciones: `NB1` = `Colabs/01_data_exploration_alignment.ipynb`, `NB2` = `Col
 | D19 | Uso responsable y sesgos |
 | D20 | Hipótesis pre-registradas |
 | D21 | Uso de asistencia de IA |
+| D22 | Split re-balanceado de Massachusetts (70/15/15 por tile) |
 
 ---
 
@@ -172,6 +173,13 @@ Esta tabla es un recordatorio de verificación, no asesoría legal.
 - **H4:** el ruido de registro de Overture topa el IoU estricto; la brecha `f1` vs `relaxed_f1` es mayor en Overture que en Massachusetts.
 - **Contexto de la literatura (especificación del curso):** baselines convolucionales ≈ mIoU 59–63 % y F1 75–79 %; DINOv2 en Cityscapes ≈ 66 % mIoU (linear probe) y ≈ 77 % (decodificación multiescala). Estos números son de otros datasets/definiciones y solo orientan.
 - **Evidencia:** NB2 (última sección con la plantilla de resultados). Se contrastarán con los JSON de Kaggle, reportando honestamente si alguna hipótesis no se cumple.
+
+### D22 · Split re-balanceado de Massachusetts Roads (70/15/15 por tile)
+- **Decisión:** en los notebooks 03–05 se juntan los 1171 tiles de Massachusetts (train + val + test originales) y se re-parten **por tile** 70/15/15 con `SPLIT_SEED = 42`: 820 / 176 / 175 tiles. `TRAIN_CROPS_PER_TILE` sube de 2 a 3 para mantener ≈ 2460 recortes por época.
+- **Alternativas:** (a) mantener el split original 1108/14/49; (b) 80/10/10; (c) re-partir por recorte.
+- **Justificación:** el split original deja solo 14 tiles (126 recortes) para validación, que selecciona el mejor checkpoint: es ruidoso y poco representativo. Re-partir por **tile** evita fuga entre splits (recortes del mismo tile no quedan en conjuntos distintos), lo que descarta la opción (c). Un 70/15/15 es consistente con el split del dataset propio (D06).
+- **Costo:** hay 26 % menos de tiles de entrenamiento (820 vs 1108), y el test ya no es el oficial de 49 tiles, así que los resultados **no son comparables** con la literatura ni con corridas hechas con el split original. Las tres condiciones (`resnet50`, `dinov2_frozen`, `dinov2_partial`) deben usar este mismo split para compararse entre sí.
+- **Evidencia:** NB3–NB5, función `list_pairs_resplit`; log de arranque con el conteo de tiles y recortes. Primer resultado: ResNet-50, IoU road de test 0.6261 (ver README).
 
 ### D21 · Asistencia de IA
 - **Qué se usó:** Claude Code (asistente de IA de Anthropic) redactó borradores de los notebooks (`Colabs/*.ipynb`), de este documento y del `README.md`, bajo la dirección del equipo (requisitos, decisiones de alcance y revisión).

@@ -17,7 +17,10 @@
 .
 ├── Colabs/
 │   ├── 01_data_exploration_alignment.ipynb   # Datos + auditoría de alineación (Overture/Esri y Massachusetts)
-│   └── 02_teardown_backbone_swap.ipynb       # Teardown (Bloque A) + entrenamiento del backbone swap (Bloque B)
+│   ├── 02_teardown_backbone_swap.ipynb       # Teardown (Bloque A) + entrenamiento del backbone swap (Bloque B)
+│   ├── 03_dinov2_partial_resplit.ipynb       # Massachusetts, split re-balanceado: dinov2_partial
+│   ├── 04_resnet50_resplit.ipynb             # Massachusetts, split re-balanceado: resnet50
+│   └── 05_dinov2_frozen_resplit.ipynb        # Massachusetts, split re-balanceado: dinov2_frozen
 ├── DECISIONS.md                              # Cuaderno de decisiones (Bloque C)
 ├── Info/                                     # Especificación del proyecto y de la E2
 └── README.md
@@ -32,7 +35,7 @@ Los notebooks están pensados para ejecutarse en **Kaggle** (no localmente) y es
 | Etiquetas | Segmentos viales de Overture Maps (vectores), rasterizados con ancho por clase | Líneas centrales de OSM rasterizadas con ancho fijo (Mnih, 2013) |
 | Imágenes | Esri World Imagery, zoom 17 (~1.17 m/px en Lima), parches de 2×2 tiles | Aéreas ~1 m/px, tiles de 1500×1500 |
 | Parches | 512×512 pre-generados (`overture_lima/`) | Recortes de 512×512 al vuelo |
-| Split | Bloques espaciales 70/15/15 | Train/val/test originales |
+| Split | Bloques espaciales 70/15/15 | Original 1108/14/49 tiles; **re-balanceado 70/15/15 por tile** (820/176/175) en los notebooks 03–05 (ver D22) |
 | Riesgo principal | Desalineación vector-imagen (se mide en el notebook 01) y términos de uso de Esri (por verificar) | Etiquetas con ruido de registro (también se audita) |
 
 ## Pipeline
@@ -65,18 +68,38 @@ flowchart LR
    - **Primera corrida:** `RUN_TEARDOWN = True` (genera `results/teardown.json` y figuras) y entrenar una condición.
    - **Una versión por cada (`DATASET`, `CONDITION`)** con `RUN_TEARDOWN = False`: `massachusetts`/`overture` × `resnet50`/`dinov2_frozen`/`dinov2_partial` (6 corridas). Si hay OOM, `BATCH_SIZE = 4`.
    - Descargar los JSON de `/kaggle/working/results/` y enviarlos al equipo; opcionalmente `RUN_LABEL_AUDIT = True` con un checkpoint de Massachusetts.
-3. Completar la tabla de resultados de abajo y las conclusiones del notebook 01.
+3. **Notebooks 03, 04 y 05 (Massachusetts con split re-balanceado):** una condición por notebook, todos con el mismo split (`SPLIT_FRACS`, `SPLIT_SEED = 42`) y la misma semilla. No modificar esos parámetros: cambiarlos invalida la comparación entre condiciones. Cada uno escribe `results/massachusetts_<condición>_resplit.json`.
+4. Completar la tabla de resultados de abajo y las conclusiones del notebook 01.
 
 ## Resultados (se completan tras las corridas en Kaggle)
 
+Las filas de Massachusetts usan el **split re-balanceado** de los notebooks 03–05 (820/176/175 tiles; no es el test oficial de 49 tiles, ver D22). Las filas con `_pendiente_` aún no se han corrido.
+
 | Dataset | Condición | Parámetros entrenables | IoU road | mIoU | F1 | F1 relajado (ρ=3) | ms/parche | VRAM pico (MB) |
 |---|---|---|---|---|---|---|---|---|
-| Massachusetts | resnet50 | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
+| Massachusetts | resnet50 | 28.00 M | 0.6261 | 0.8005 | 0.7700 | 0.9108 | _pendiente_ (teardown) | _pendiente_ |
 | Massachusetts | dinov2_frozen | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
 | Massachusetts | dinov2_partial | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
 | Overture (Lima) | resnet50 | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
 | Overture (Lima) | dinov2_frozen | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
 | Overture (Lima) | dinov2_partial | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
+
+### Resultado preliminar: ResNet-50 en Massachusetts (split re-balanceado)
+
+Corrida de `Colabs/04_resnet50_resplit.ipynb` en Kaggle (T4, AMP FP16, 20 épocas, ~100 s/época, ≈ 34 min en total). Datos: 2460 / 1363 / 1339 recortes de 512×512 (train / val / test) sobre 820 / 176 / 175 tiles.
+
+| Conjunto | IoU road | mIoU | F1 | Precisión | Recall | F1 relajado (ρ=3) |
+|---|---|---|---|---|---|---|
+| Validación (época 20) | 0.6384 | 0.8090 | 0.7793 | – | – | 0.9159 |
+| **Test** (mejor checkpoint, época 20) | **0.6261** | 0.8005 | 0.7700 | 0.7772 | 0.7630 | 0.9108 |
+
+Lectura:
+- **Convergencia:** la `IoU_road` de validación sube de 0.457 (época 1) a 0.614 (época 5) y se estabiliza en 0.638 desde la época ~17; no hay señal de sobreajuste (la pérdida de validación baja de forma sostenida hasta ≈ 0.357).
+- **Generalización:** el test queda ≈ 1.2 puntos de IoU por debajo de la validación (0.626 vs 0.638), una brecha pequeña con un test de 175 tiles.
+- **Error de posición:** `F1` estricto 0.770 frente a `F1` relajado 0.911. Gran parte de los errores son desplazamientos de pocos píxeles, consistente con el ruido de registro de las etiquetas (OSM rasterizado).
+- **Precisión y recall equilibrados** (0.777 / 0.763): el modelo no está sesgado hacia sobre- ni subsegmentar.
+- **Comparabilidad:** `mIoU` aquí es el promedio de `IoU_road` e `IoU_bg` (0.975), por lo que su valor alto **no es comparable** con el mIoU de la literatura (59–63 %). Además, el split no es el oficial. Es el punto de referencia para `dinov2_frozen` y `dinov2_partial` con el mismo split.
+- Pendiente: tiempo por parche y VRAM pico (salen del teardown y del JSON de la corrida).
 
 **Alineación Overture vs Massachusetts** (de `results/alignment_*.json`): _pendiente_ (mediana de |offset| en px y m, % ≤ 2 px, fracción media de vía, IoU a 2 y 4 px).
 
