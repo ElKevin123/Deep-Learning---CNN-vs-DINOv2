@@ -2,7 +2,7 @@
 
 Proyecto: **¿Sirven las features de DINOv2 fuera de ImageNet? Extracción de redes viales frente a CNN** (Grupo 5, Deep Learning).
 
-Este documento registra cada decisión de diseño con sus alternativas, justificación y el lugar donde se puede verificar. Los notebooks aún no se han ejecutado en Kaggle al momento de escribir este documento; donde la evidencia depende de una corrida, se indica como **"por verificar"**.
+Este documento registra cada decisión de diseño con sus alternativas, justificación y el lugar donde se puede verificar. Los notebooks 02–05 ya se ejecutaron en Kaggle para Massachusetts (resultados en el `README.md`); los de Overture/Lima y la auditoría de alineación siguen **"por verificar"**.
 
 Convenciones: `NB1` = `Colabs/01_data_exploration_alignment.ipynb`, `NB2` = `Colabs/02_teardown_backbone_swap.ipynb`.
 
@@ -173,15 +173,19 @@ Esta tabla es un recordatorio de verificación, no asesoría legal.
 - **H4:** el ruido de registro de Overture topa el IoU estricto; la brecha `f1` vs `relaxed_f1` es mayor en Overture que en Massachusetts.
 - **Contexto de la literatura (especificación del curso):** baselines convolucionales ≈ mIoU 59–63 % y F1 75–79 %; DINOv2 en Cityscapes ≈ 66 % mIoU (linear probe) y ≈ 77 % (decodificación multiescala). Estos números son de otros datasets/definiciones y solo orientan.
 - **Evidencia:** NB2 (última sección con la plantilla de resultados). Se contrastarán con los JSON de Kaggle, reportando honestamente si alguna hipótesis no se cumple.
+- **Estado tras las corridas en Massachusetts (split re-balanceado, 1 semilla por condición):**
+  - **H1 se cumple:** `dinov2_frozen` (IoU road 0.5760) < `resnet50` (0.6261), 5.0 puntos por debajo.
+  - **H2 se cumple solo en parte:** `dinov2_partial` (0.5809) supera a `dinov2_frozen` y no alcanza a `resnet50`, pero cierra solo 0.5 de los 5.0 puntos de brecha. La mejora **no** es mayor en F1 relajado (+0.3) que en IoU road (+0.5) ni en F1 (+0.4). Con una sola semilla, la diferencia frozen vs partial podría ser ruido.
+  - **H3 y H4:** sin evidencia todavía; requieren las corridas en Overture/Lima y la auditoría de alineación.
+
+### D21 · Asistencia de IA
+- **Qué se usó:** Claude Code (asistente de IA de Anthropic) redactó borradores de los notebooks (`Colabs/*.ipynb`), de este documento y del `README.md`, bajo la dirección del equipo (requisitos, decisiones de alcance y revisión).
+- **Qué NO se hizo:** los notebooks **no fueron ejecutados** por el asistente (no hay GPU ni acceso a los datos en su entorno); la validación local fue estática (JSON válido y análisis sintáctico de todas las celdas). Las afirmaciones sobre rendimiento, tiempos, VRAM y alineación son **hipótesis hasta que se ejecuten en Kaggle**.
+- **Responsabilidad del equipo:** cada integrante debe revisar, entender y poder defender cada decisión y cada línea de código antes de la entrega. Los detalles de APIs externas (CLI `overturemaps`, firma de `torch.hub.load('facebookresearch/dinov2', ...)`, `get_intermediate_layers`, `FlopCounterMode`) deben comprobarse al correr los notebooks y corregirse si la versión instalada difiere.
 
 ### D22 · Split re-balanceado de Massachusetts Roads (70/15/15 por tile)
 - **Decisión:** en los notebooks 03–05 se juntan los 1171 tiles de Massachusetts (train + val + test originales) y se re-parten **por tile** 70/15/15 con `SPLIT_SEED = 42`: 820 / 176 / 175 tiles. `TRAIN_CROPS_PER_TILE` sube de 2 a 3 para mantener ≈ 2460 recortes por época.
 - **Alternativas:** (a) mantener el split original 1108/14/49; (b) 80/10/10; (c) re-partir por recorte.
 - **Justificación:** el split original deja solo 14 tiles (126 recortes) para validación, que selecciona el mejor checkpoint: es ruidoso y poco representativo. Re-partir por **tile** evita fuga entre splits (recortes del mismo tile no quedan en conjuntos distintos), lo que descarta la opción (c). Un 70/15/15 es consistente con el split del dataset propio (D06).
 - **Costo:** hay 26 % menos de tiles de entrenamiento (820 vs 1108), y el test ya no es el oficial de 49 tiles, así que los resultados **no son comparables** con la literatura ni con corridas hechas con el split original. Las tres condiciones (`resnet50`, `dinov2_frozen`, `dinov2_partial`) deben usar este mismo split para compararse entre sí.
-- **Evidencia:** NB3–NB5, función `list_pairs_resplit`; log de arranque con el conteo de tiles y recortes. Primer resultado: ResNet-50, IoU road de test 0.6261 (ver README).
-
-### D21 · Asistencia de IA
-- **Qué se usó:** Claude Code (asistente de IA de Anthropic) redactó borradores de los notebooks (`Colabs/*.ipynb`), de este documento y del `README.md`, bajo la dirección del equipo (requisitos, decisiones de alcance y revisión).
-- **Qué NO se hizo:** los notebooks **no fueron ejecutados** por el asistente (no hay GPU ni acceso a los datos en su entorno); la validación local fue estática (JSON válido y análisis sintáctico de todas las celdas). Las afirmaciones sobre rendimiento, tiempos, VRAM y alineación son **hipótesis hasta que se ejecuten en Kaggle**.
-- **Responsabilidad del equipo:** cada integrante debe revisar, entender y poder defender cada decisión y cada línea de código antes de la entrega. Los detalles de APIs externas (CLI `overturemaps`, firma de `torch.hub.load('facebookresearch/dinov2', ...)`, `get_intermediate_layers`, `FlopCounterMode`) deben comprobarse al correr los notebooks y corregirse si la versión instalada difiere.
+- **Evidencia:** NB3–NB5, función `list_pairs_resplit`; log de arranque con el conteo de tiles y recortes. Resultados con este split: ResNet-50 0.6261, `dinov2_partial` 0.5809, `dinov2_frozen` 0.5760 de IoU road en test (ver README).
