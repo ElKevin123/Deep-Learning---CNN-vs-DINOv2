@@ -1,0 +1,62 @@
+CONTEXTO GENERAL DEL PROYECTO Y ESPECIFICACIÓN DE LA ENTREGA 2 (E2)
+
+1. FICHA Y ALCANCE GENERAL DEL PROYECTO
+- Curso: Tarea Académica (TA) de Deep Learning.
+- Grupo: Grupo 5.
+- Dataset: Transportation Networks (Meta AI for Good / Overture Maps Foundation).
+- Modelos a contrastar: ResNet-50 (Línea Base CNN) frente a DINOv2 (Vision Transformer fundacional de Meta AI).
+- Pregunta de investigación / Tema oficial: ¿Sirven las features de DINOv2 fuera de ImageNet? Extracción de redes viales frente a CNN.
+- Tarea de Deep Learning: Segmentación semántica binaria a nivel de píxel sobre parches satelitales RGB (512x512).
+  * Entrada: Imagen satelital óptica RGB (512x512 píxeles).
+  * Salida: Máscara binaria a nivel de píxel (512x512 píxeles), donde 1 representa vía/calle/carretera y 0 representa fondo (edificaciones, suelo, vegetación).
+  * Justificación: Se descartó segmentación multiclase para evitar desbalance extremo de clases y ruido en jerarquías administrativas.
+- Entorno de cómputo: Kaggle Notebooks (GPU NVIDIA T4 de 16 GB VRAM, precisión mixta con torch.cuda.amp).
+
+2. METODOLOGÍA EXPERIMENTAL: BACKBONE SWAP
+Para aislar rigurosamente la variable de estudio (representaciones convolucionales con sesgo local vs. autoatención global de Vision Transformers):
+- Decodificador fijo común: Se diseña y mantiene exactamente el mismo decodificador espacial tipo U-Net (upsampling + bloques convolucionales + skip connections) y la misma función de pérdida compuesta: L_total = L_BCE + L_Dice.
+- Experimento 1 (Línea Base): Entrada -> ResNet-50 (extractor convolucional) -> Decodificador U-Net -> Máscara binaria.
+- Experimento 2 (Intervención / Swap): Entrada -> DINOv2-ViT (extractor fundacional congelado/parcial) -> Mismo Decodificador U-Net -> Máscara binaria.
+- Qué se entrena:
+  * El decodificador U-Net siempre se entrena desde cero al 100%.
+  * En DINOv2 se descarta la cabeza MLP original.
+  * Para Linear Probing: DINOv2 va 100% congelado (requires_grad = False).
+  * Para Fine-Tuning parcial (ablación): Se congelan bloques tempranos y solo se descongelan los últimos 1-2 bloques de atención con un learning rate muy bajo.
+
+3. LO QUE SE PIDE EXACTAMENTE EN ESTA ENTREGA (ENTREGA 2 - E2)
+- Nombre oficial del entregable: E2 · Teardown del modelo base + intervención preliminar + cuaderno de decisiones (GitHub).
+- Puntaje: 8 puntos de la nota final.
+- Lo que debe contener el trabajo y repositorio para esta entrega:
+
+BLOQUE A: TEARDOWN / DISECCIÓN INSTRUMENTADA (FASE A)
+- Abrir las arquitecturas y documentar su perfil computacional y de representaciones internas:
+  1. Conteo exacto de parámetros: Totales, entrenables y no entrenables de ResNet-50 vs. DINOv2 (dinov2_vits14 o dinov2_vitb14).
+  2. Perfilado de cómputo (FLOPs/MACs): Cálculo analítico o empírico para una entrada fija de 3x512x512.
+  3. Latencia y Throughput: Medición en milisegundos por parche (ms/parche) usando eventos de sincronización CUDA (torch.cuda.Event).
+  4. Huella de memoria VRAM: Consumo en reposo y pico de memoria asignada con torch.cuda.max_memory_allocated() en GPU T4 de Kaggle.
+  5. Visualización de representaciones intermedias:
+     - Mapas de activación convolucionales en etapas intermedias de ResNet-50 (layer1, layer2, layer3, layer4) con hooks.
+     - Mapas de autoatención multi-cabeza y visualización por PCA de los patch tokens de DINOv2 sobre las carreteras para verificar cómo segmenta de forma emergente sin supervisión.
+
+BLOQUE B: INTERVENCIÓN PRELIMINAR Y CÓDIGO DE ABLACIÓN (FASE B TEMPRANA)
+- Implementación funcional en PyTorch del pipeline modular de Backbone Swap:
+  1. Módulo del decodificador U-Net compatible con ambos extractores.
+  2. Implementación de la función de pérdida combinada BCE + Dice.
+  3. Código ejecutable para:
+     - Condición 1 (Control): ResNet-50 + Decoder U-Net.
+     - Condición 2 (Linear Probing): DINOv2 congelado + Decoder U-Net.
+     - Condición 3 (Ablación opcional/parcial): DINOv2 fine-tuning de cola + Decoder U-Net.
+  4. Registro y cálculo de métricas de validación: mIoU (Jaccard) y F1-Score (Dice).
+
+BLOQUE C: CUADERNO DE DECISIONES (DECISION LOG / GITHUB)
+- Documento técnico (DECISIONS.md o README.md estructurado) con la justificación de diseño:
+  1. Justificación de los datos y tarea (por qué segmentación binaria, área geográfica recortada de Overture Maps y tamaño de parches 512x512).
+  2. Justificación arquitectónica del Backbone Swap y del decodificador común.
+  3. Justificación de cómputo y memoria (precisión mixta FP16, tamaño de batch 4 u 8, qué capas congelar y viabilidad en Kaggle).
+
+4. CONTEXTO DE BENCHMARKS DE LA LITERATURA
+- Líneas base convolucionales (ResNet / ResUnet en papers como SAM2-RoadNet, DeepGlobe/Mass. Roads): suelen alcanzar mIoU de ~59% a ~63% y F1-Score de ~75% a ~79%.
+- DINOv2: En Cityscapes/escenas urbanas con linear probe alcanza ~66% mIoU y con decodificación multiescala sube a ~77% mIoU. La meta del proyecto es medir su transferencia hacia la extracción de vías satelitales.
+
+5. MISIÓN REQUERIDA
+Con base en todo este contexto, asísteme paso a paso en la generación del código en PyTorch (teardown, perfiles de memoria/FLOPs, hooks de visualización, arquitectura del Backbone Swap y pipeline de entrenamiento) y en la redacción técnica del Cuaderno de Decisiones para completar íntegramente la Entrega 2.
