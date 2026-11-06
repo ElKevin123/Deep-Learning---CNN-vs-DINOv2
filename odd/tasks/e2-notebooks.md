@@ -71,6 +71,14 @@ data risk, so it must be measured, not assumed.
 - 2026-10-21: written `DECISIONS.md` (D01-D21) and `README.md` (Spanish).
 - Builder scripts live in the session scratchpad (nbhelp.py, nb1_part*.py, nb2_part*.py, build_nb*.py, validate.py); notebooks regenerate from them.
 
-## Next step
-T1–T3 via delegated writer, then T4.
+## Current status
+The original T1–T4 authoring and static review are complete. Massachusetts results from notebooks 02–05 are documented in README; Overture and alignment remain pending.
 - 2026-10-21: parent review done (validate.py ALL OK, 0 parse errors; ERF/rasterize/metrics spot-checked). Runtime on Kaggle still pending.
+
+
+## Update 2026-11-05: selected configurations, 50 epochs
+- Reviewed five supplied experiment notebooks and three result archives before preparing changes.
+- Added `Colabs/06_resnet50_best_50ep.ipynb`, `07_dinov2_frozen_best_50ep.ipynb`, and `08_dinov2_partial_best_50ep.ipynb` in the supplied section-based format.
+- Selection uses validation road IoU: ResNet backbone LR 2e-4; frozen neck 3x3 at all four scales; partial last four blocks + norm. Shared 50 epochs, fixed patches, augmentation, U-Net, BCE+Dice, evaluation.
+- Updated README and DECISIONS; full provenance and limitations in `CAMBIOS_HIPERPARAMETROS_50E.md`.
+- Static and CPU-only configuration checks are separate from GPU execution. Next: run the three new notebooks on Kaggle/Colab, collect their JSON results, and update the pending 50-epoch results. Overture/alignment work remains pending.

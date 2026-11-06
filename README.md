@@ -20,13 +20,17 @@
 │   ├── 02_teardown_backbone_swap.ipynb       # Teardown (Bloque A) + entrenamiento del backbone swap (Bloque B)
 │   ├── 03_dinov2_partial_resplit.ipynb       # Massachusetts, split re-balanceado: dinov2_partial
 │   ├── 04_resnet50_resplit.ipynb             # Massachusetts, split re-balanceado: resnet50
-│   └── 05_dinov2_frozen_resplit.ipynb        # Massachusetts, split re-balanceado: dinov2_frozen
+│   ├── 05_dinov2_frozen_resplit.ipynb        # Massachusetts, split re-balanceado: dinov2_frozen
+│   ├── 06_resnet50_best_50ep.ipynb            # Configuración seleccionada: 50 épocas
+│   ├── 07_dinov2_frozen_best_50ep.ipynb       # Configuración seleccionada: 50 épocas
+│   └── 08_dinov2_partial_best_50ep.ipynb      # Configuración seleccionada: 50 épocas
+├── CAMBIOS_HIPERPARAMETROS_50E.md             # Evidencia, selección e implementaciones
 ├── DECISIONS.md                              # Cuaderno de decisiones (Bloque C)
 ├── Info/                                     # Especificación del proyecto y de la E2
 └── README.md
 ```
 
-Los notebooks están pensados para ejecutarse en **Kaggle** (no localmente) y escriben todo bajo `/kaggle/working/`.
+Los notebooks históricos 01–05 están pensados para **Kaggle**. Los nuevos 06–08 también admiten **Google Colab** y usan rutas de salida propias de cada entorno.
 
 ## Los dos datasets
 
@@ -34,7 +38,7 @@ Los notebooks están pensados para ejecutarse en **Kaggle** (no localmente) y es
 |---|---|---|
 | Etiquetas | Segmentos viales de Overture Maps (vectores), rasterizados con ancho por clase | Líneas centrales de OSM rasterizadas con ancho fijo (Mnih, 2013) |
 | Imágenes | Esri World Imagery, zoom 17 (~1.17 m/px en Lima), parches de 2×2 tiles | Aéreas ~1 m/px, tiles de 1500×1500 |
-| Parches | 512×512 pre-generados (`overture_lima/`) | Recortes de 512×512 al vuelo |
+| Parches | 512×512 pre-generados (`overture_lima/`) | Recortes al vuelo en 03–05; parches fijos de 512×512 en 06–08 |
 | Split | Bloques espaciales 70/15/15 | Original 1108/14/49 tiles; **re-balanceado 70/15/15 por tile** (820/176/175) en los notebooks 03–05 (ver D22) |
 | Riesgo principal | Desalineación vector-imagen (se mide en el notebook 01) y términos de uso de Esri (por verificar) | Etiquetas con ruido de registro (también se audita) |
 
@@ -71,7 +75,49 @@ flowchart LR
 3. **Notebooks 03, 04 y 05 (Massachusetts con split re-balanceado):** una condición por notebook, todos con el mismo split (`SPLIT_FRACS`, `SPLIT_SEED = 42`) y la misma semilla. No modificar esos parámetros: cambiarlos invalida la comparación entre condiciones. Cada uno escribe `results/massachusetts_<condición>_resplit.json`.
 4. Completar la tabla de resultados de abajo y las conclusiones del notebook 01.
 
-## Resultados (se completan tras las corridas en Kaggle)
+## Configuraciones seleccionadas: nueva etapa de 50 épocas
+
+Se revisaron cinco notebooks de experimentación y tres ZIP de resultados. La selección usa
+el **máximo IoU de vías de validación a umbral 0.5** entre las configuraciones medidas.
+Los resultados de esta tabla corresponden a **20 épocas**; las nuevas corridas de 50 están pendientes.
+
+| Modelo | Configuración seleccionada | IoU val histórico | IoU test histórico | Notebook nuevo |
+|---|---|---|---|---|
+| ResNet-50 | LR backbone `2e-4`, cabeza `3e-4`, WD `1e-4`, ajuste completo | ≈ 0.6524 | ≈ 0.6407 | [06_resnet50_best_50ep.ipynb](Colabs/06_resnet50_best_50ep.ipynb) |
+| DINOv2 parcial | 4 bloques finales + norm, LR cola `1e-5`, cabeza `3e-4`, neck 1×1 | 0.6130734385 | 0.5997274357 | [08_dinov2_partial_best_50ep.ipynb](Colabs/08_dinov2_partial_best_50ep.ipynb) |
+| DINOv2 congelado | neck 3×3 en /4,/8,/16,/32, LR cabeza `3e-4` | 0.6130336456 | 0.6001402528 | [07_dinov2_frozen_best_50ep.ipynb](Colabs/07_dinov2_frozen_best_50ep.ipynb) |
+
+**Común a los tres:** 50 épocas desde pesos preentrenados, batch 8, AdamW, weight decay `1e-4`,
+warmup lineal 5 % + coseno recalculado sobre los pasos de 50 épocas, AMP FP16,
+gradient clipping 1.0, semilla 42, BCE + Dice con peso positivo 1 y U-Net de 3,098,433 parámetros.
+DINOv2 usa ViT-S/14, entrada 518² y bloques de salida (2,5,8,11).
+
+Los nuevos notebooks usan parches **fijos** en rejilla 3×3 por tile y filtro de blanco >25 %:
+6128/1363/1339 parches train/val/test, con el split por tile 820/176/175.
+Huella de datos esperada `d432311dc79d`; nueva huella común `2e062dd44e9d`.
+Esto cambia el entrenamiento respecto a los notebooks 03–05 (2460 recortes por época):
+las mejoras históricas no se pueden atribuir únicamente a los hiperparámetros.
+Además, la comparación seleccionada incluye distintos necks y grados de ajuste.
+
+Para ejecutarlos, importar cada notebook en Kaggle o Colab con GPU T4 e Internet;
+agregar Massachusetts Roads en Kaggle o permitir su descarga con `kagglehub` en Colab.
+Ejecutar en orden con `SMOKE_TEST=False`. Solo se ejecuta `selected_50ep`;
+`True` realiza una prueba de una época con evaluación reducida, excluida del informe.
+Las salidas se guardan en `/kaggle/working/<condición>_50ep/` o
+`/content/outputs/<condición>_50ep/`, con subcarpetas `results`, `figures` y `checkpoints`.
+El ZIP `outputs_<condición>_50ep.zip` incluye resultados y figuras; descargar los checkpoints aparte.
+
+El mejor checkpoint se elige por validación a 0.5. Se reportan test oficial, test con umbral
+calibrado **en validación** y TTA en columnas separadas. El umbral se recalibra en la nueva corrida.
+Una caché solo se reutiliza si coincide la configuración completa, ambas huellas, condición,
+modo smoke y secuencia completa de épocas.
+
+En congelado, `neck3x3_lr6e-4` ganó en test (0.6010101562), pero `neck_3x3_all` ganó
+en validación por apenas 0.0162 puntos porcentuales. La elección es provisional y no demuestra
+superioridad estadística. No se combinó LR `6e-4` con refinamiento en las cuatro escalas porque
+esa combinación no fue medida. Ver [evaluación y cambios completos](CAMBIOS_HIPERPARAMETROS_50E.md).
+
+## Resultados históricos: notebooks 03–05 (20 épocas)
 
 Las filas de Massachusetts usan el **split re-balanceado** de los notebooks 03–05 (820/176/175 tiles; no es el test oficial de 49 tiles, ver D22), con **una sola corrida por condición** (semilla 42). Las filas de Overture (Lima) aún no se han corrido. `ms/parche` = inferencia del modelo completo, batch 8, FP16, T4 (teardown). `VRAM pico` = entrenamiento, batch 8, AMP (teardown).
 
@@ -84,7 +130,7 @@ Las filas de Massachusetts usan el **split re-balanceado** de los notebooks 03�
 | Overture (Lima) | dinov2_frozen | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
 | Overture (Lima) | dinov2_partial | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ | _pendiente_ |
 
-### Resultados de entrenamiento en Massachusetts (split re-balanceado)
+### Resultados históricos de entrenamiento en Massachusetts (split re-balanceado)
 
 Corridas de `Colabs/03`, `04` y `05` (carpeta `Colabs/teardown - primeros resultados/`) en Kaggle T4, AMP FP16, 20 épocas, batch 8, mismo decodificador (3.10 M), misma pérdida (BCE + Dice) y misma semilla. Datos: 2460 / 1363 / 1339 recortes de 512×512 (train / val / test) sobre 820 / 176 / 175 tiles.
 

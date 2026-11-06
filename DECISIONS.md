@@ -4,6 +4,8 @@ Proyecto: **¿Sirven las features de DINOv2 fuera de ImageNet? Extracción de re
 
 Este documento registra cada decisión de diseño con sus alternativas, justificación y el lugar donde se puede verificar. Los notebooks 02–05 ya se ejecutaron en Kaggle para Massachusetts (resultados en el `README.md`); los de Overture/Lima y la auditoría de alineación siguen **"por verificar"**.
 
+Actualización 2026-11-05: los notebooks 06–08 preparan las configuraciones seleccionadas a **50 épocas**; su entrenamiento sigue pendiente. Los valores de 20 épocas se mantienen como evidencia histórica (ver D23–D25 y `CAMBIOS_HIPERPARAMETROS_50E.md`).
+
 Convenciones: `NB1` = `Colabs/01_data_exploration_alignment.ipynb`, `NB2` = `Colabs/02_teardown_backbone_swap.ipynb`.
 
 ## Índice de decisiones
@@ -32,6 +34,9 @@ Convenciones: `NB1` = `Colabs/01_data_exploration_alignment.ipynb`, `NB2` = `Col
 | D20 | Hipótesis pre-registradas |
 | D21 | Uso de asistencia de IA |
 | D22 | Split re-balanceado de Massachusetts (70/15/15 por tile) |
+| D23 | Selección por validación de hiperparámetros medidos |
+| D24 | Protocolo común de 50 épocas sobre parches fijos |
+| D25 | Separación de resultados, trazabilidad y validación local |
 
 ---
 
@@ -117,7 +122,7 @@ Convenciones: `NB1` = `Colabs/01_data_exploration_alignment.ipynb`, `NB2` = `Col
 - **Justificación:** con tokens 37×37 = 1369, la atención cuesta O(N²) y ViT-B a batch 8 con activaciones y AdamW arriesga OOM en T4 de 16 GB; ViT-S entrena con holgura y es la comparación más justa en parámetros con los ~23.5 M de ResNet-50. La especificación del curso admite `vits14` o `vitb14`. Si el equipo dispone de recursos, `DINO_VARIANT` permite cambiar a `dinov2_vitb14`.
 - **Evidencia:** NB2 §A4 (VRAM medida; por verificar en la T4).
 
-### D13 · Condiciones: DINOv2 congelado (linear probing con decodificador) vs. cola descongelada
+### D13 · Condiciones históricas (02–05; nueva selección en D23): DINOv2 congelado (linear probing con decodificador) vs. cola descongelada
 - **Decisión:** `dinov2_frozen` (`requires_grad=False`, modo eval); `dinov2_partial` descongela los últimos `N_UNFREEZE = 2` bloques y la `norm` final con LR 1e-5; ResNet-50 con fine-tuning completo (LR 1e-4). Decodificador/adaptador/neck siempre desde cero (LR 3e-4).
 - **Alternativas:** fine-tuning completo de DINOv2; LoRA; ResNet-50 también congelado.
 - **Justificación:** la especificación pide linear probing y fine-tuning parcial de la cola con LR muy bajo. Nota técnica: las features de los bloques 2, 5 y 8 no dependen de los bloques 10–11, así que descongelar la cola solo modifica el último mapa (y la `norm` compartida); es una ablación acotada, no una adaptación global. Comparar ResNet completo vs. DINOv2 congelado confunde "arquitectura" con "cantidad de adaptación"; por eso existe la condición parcial y se interpreta con cuidado.
@@ -138,7 +143,7 @@ Convenciones: `NB1` = `Colabs/01_data_exploration_alignment.ipynb`, `NB2` = `Col
 
 ## Bloque 3 · Cómputo y reproducibilidad
 
-### D16 · Cómputo: AMP FP16, batch 8 (respaldo 4), viabilidad en Kaggle T4
+### D16 · Cómputo histórico (02–05; 50 épocas en D24): AMP FP16, batch 8 (respaldo 4), viabilidad en Kaggle T4
 - **Decisión:** `torch.autocast(float16)` + `GradScaler`, recorte de gradiente 1.0, batch 8 con respaldo a 4 si hay OOM, 20 épocas, AdamW con warmup + coseno.
 - **Alternativas:** FP32 (más lento y más memoria), bfloat16 (no soportado de forma eficiente en T4), batch 16.
 - **Justificación:** la T4 (16 GB, tensor cores FP16) hace viable ViT-S a 518 px con batch 8 en AMP; el backbone congelado no guarda activaciones, lo que reduce memoria. El teardown mide el pico real de VRAM de un paso de entrenamiento con batch 4 y 8 (NB2 §A4) y captura los OOM.
@@ -180,7 +185,8 @@ Esta tabla es un recordatorio de verificación, no asesoría legal.
 
 ### D21 · Asistencia de IA
 - **Qué se usó:** Claude Code (asistente de IA de Anthropic) redactó borradores de los notebooks (`Colabs/*.ipynb`), de este documento y del `README.md`, bajo la dirección del equipo (requisitos, decisiones de alcance y revisión).
-- **Qué NO se hizo:** los notebooks **no fueron ejecutados** por el asistente (no hay GPU ni acceso a los datos en su entorno); la validación local fue estática (JSON válido y análisis sintáctico de todas las celdas). Las afirmaciones sobre rendimiento, tiempos, VRAM y alineación son **hipótesis hasta que se ejecuten en Kaggle**.
+- **Actualización 2026-11-05:** Codex leyó las cinco fuentes ipynb y los tres ZIP suministrados, seleccionó configuraciones por validación y preparó los notebooks 06–08 y esta actualización documental. Se verificaron sintaxis y funciones de configuración/caché/scheduler con Python estándar; no se ejecutó entrenamiento ni inferencia en GPU. El informe separa las métricas aportadas de los resultados pendientes.
+- **Qué NO se hizo en la elaboración original:** los notebooks **no fueron ejecutados** por el asistente (no hay GPU ni acceso a los datos en su entorno); la validación local fue estática (JSON válido y análisis sintáctico de todas las celdas). Las afirmaciones sobre rendimiento, tiempos, VRAM y alineación son **hipótesis hasta que se ejecuten en Kaggle**.
 - **Responsabilidad del equipo:** cada integrante debe revisar, entender y poder defender cada decisión y cada línea de código antes de la entrega. Los detalles de APIs externas (CLI `overturemaps`, firma de `torch.hub.load('facebookresearch/dinov2', ...)`, `get_intermediate_layers`, `FlopCounterMode`) deben comprobarse al correr los notebooks y corregirse si la versión instalada difiere.
 
 ### D22 · Split re-balanceado de Massachusetts Roads (70/15/15 por tile)
@@ -189,3 +195,29 @@ Esta tabla es un recordatorio de verificación, no asesoría legal.
 - **Justificación:** el split original deja solo 14 tiles (126 recortes) para validación, que selecciona el mejor checkpoint: es ruidoso y poco representativo. Re-partir por **tile** evita fuga entre splits (recortes del mismo tile no quedan en conjuntos distintos), lo que descarta la opción (c). Un 70/15/15 es consistente con el split del dataset propio (D06).
 - **Costo:** hay 26 % menos de tiles de entrenamiento (820 vs 1108), y el test ya no es el oficial de 49 tiles, así que los resultados **no son comparables** con la literatura ni con corridas hechas con el split original. Las tres condiciones (`resnet50`, `dinov2_frozen`, `dinov2_partial`) deben usar este mismo split para compararse entre sí.
 - **Evidencia:** NB3–NB5, función `list_pairs_resplit`; log de arranque con el conteo de tiles y recortes. Resultados con este split: ResNet-50 0.6261, `dinov2_partial` 0.5809, `dinov2_frozen` 0.5760 de IoU road en test (ver README).
+
+
+### D23 · Seleccionar configuraciones con IoU de vías de validación
+- **Criterio:** máximo `best_val.iou_road` a umbral 0.5. En ResNet solo se dispone de logs redondeados a cuatro decimales; se toma el máximo de los logs de cada corrida. Los JSON de DINO aportan precisión completa.
+- **ResNet-50:** `LR_BACKBONE=2e-4`, cabeza `3e-4`, WD `1e-4`, adaptador 1×1, sin dropout y ajuste completo. Val ≈0.6524, test ≈0.6407; LR 3e-4 tuvo val ≈0.6515. No se combinan WD 1e-3 y LR 2e-4, pues no fueron medidos juntos.
+- **DINOv2 parcial:** `N_UNFREEZE=4` (8–11 + norm), LR cola `1e-5`, LLRD 1.0, cabeza `3e-4`, WD `1e-4`, neck bilineal 1×1. Val 0.6130734385, test 0.5997274357. Se mantiene BCE + Dice y peso positivo 1: focal y peso 3 tuvieron menor val.
+- **DINOv2 congelado:** neck bilineal + 1×1 + refinamiento 3×3 en /4,/8,/16,/32, cabeza `3e-4`, WD `1e-4`, cero bloques descongelados. Val 0.6130336456, test 0.6001402528. La alternativa LR 6e-4 refinando solo /4,/8 tuvo mayor test pero menor val. La diferencia de val (0.0162 puntos porcentuales) exige cautela con una sola semilla.
+- **Alcance:** mejores entre las configuraciones medidas bajo este criterio; no un óptimo global ni una garantía a 50 épocas. La comparación de configuraciones seleccionadas incluye diferencias de neck y grados de ajuste, además del backbone. No altera el control histórico D09.
+- **Evidencia:** fuentes, hashes, tabla de todas las corridas y límites en `CAMBIOS_HIPERPARAMETROS_50E.md`.
+
+### D24 · Cincuenta épocas y datos fijos compartidos (06–08)
+- **Decisión:** una corrida `selected_50ep` por notebook, 50 épocas desde preentrenamiento; batch 8, semilla 42, AdamW, warmup 5 % + coseno calculado sobre todos los pasos de las 50 épocas, AMP FP16 y clipping 1.0. No hay early stopping; se conserva el mejor checkpoint por validación.
+- **Datos:** mismo re-split por tile de D22, pero rejilla fija 3×3 (0,494,988), exclusión de parches con >25 % de blanco: 6128/1363/1339 parches. Huella esperada `d432311dc79d`. Se comprueba que cada tile pertenezca a un único split.
+- **Comparabilidad:** 03–05 usaban 2460 recortes por época. El cambio de muestreo y número de pasos impide atribuir las mejoras entre etapas solo a hiperparámetros. Los parches se solapan dentro de cada tile, sin repartirse entre splits; aún puede haber autocorrelación entre tiles vecinos.
+- **Común:** decoder 3,098,433 parámetros, BCE + Dice (peso 1), augmentation y métricas originales. DINO ViT-S/14 a 518², mapas de bloques (2,5,8,11).
+- **Identidad:** nueva huella `2e062dd44e9d`, idéntica en los tres notebooks e incluyendo la tabla de selección. La huella histórica `234ea433fba9` identifica las fuentes de 20 épocas.
+- **Evaluación:** umbral oficial 0.5; calibración nueva en val y TTA reportados por separado. No se fija de antemano el umbral histórico 0.45 como ganador de la nueva corrida.
+- **Estado:** los resultados a 50 épocas y sus tiempos/VRAM están pendientes de ejecución en Kaggle o Colab.
+
+### D25 · Trazabilidad de salidas y comprobaciones
+- **Decisión:** directorios por arquitectura y protocolo de 50 épocas; comparación desde `ALL_RESULTS` de la sesión, sin mezclar referencias históricas. Se limpian salidas y contadores de las copias entregadas.
+- **Caché:** solo omitir entrenamiento si coinciden configuración completa, condición, modo smoke, huellas y secuencia de todas las épocas. Una corrida de 20 épocas no satisface una de 50.
+- **Registro:** LR inicial por grupo y LR final por separado; el código fuente registraba los grupos al terminar el scheduler y podía mostrar cero como si fuera el LR configurado. El checkpoint incorpora configuración, condición y huella de datos.
+- **Portabilidad:** instalación condicional de `kagglehub`; búsqueda de Massachusetts y descarga para Colab; rutas por entorno y enlace al ZIP. Se evita la celda añadida al principio de `DINOv2_Frozen.ipynb`, que descargaba datos antes de comprobar dependencias.
+- **Correcciones:** la copia de ResNet se basa en la variante con `val_ds` válido; `renet-hiperparametros (1).ipynb` contiene `va l_ds` y no puede ejecutarse tal como está guardado. Sus logs son evidencia aportada, no reproducida aquí.
+- **Verificación:** análisis sintáctico de todas las celdas; ejecución de la configuración, pruebas de aceptación/rechazo de caché y funciones de planificación. No equivale a una ejecución GPU ni valida dependencias externas.
